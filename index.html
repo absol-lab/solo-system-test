@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>My Collection</title>
+<!--
+  The Solo AI System — Starter Kit (single-file app skeleton)
+  ==================================================================
+  Everything lives in this one file: layout, motion, data, sync.
+
+  BEFORE YOU SHIP — edit the CONFIG block in the <script> below:
+    APP_NAME     the name shown in the header
+    RELAY_URL    your relay's web app URL (see relay.gs)
+    RELAY_SECRET the same secret you set in relay.gs
+    FILE_NAME    the JSON file name on Drive, e.g. "my-data.json"
+
+  The pattern in one paragraph:
+    The JSON file on Drive is the single source of truth ("canonical").
+    This app caches a copy on the device for speed, merges by each
+    record's updated_at, and writes the merged result back through
+    the relay. Never treat the cache as the truth.
+-->
+<style>
+  :root{
+    --bg:#171310; --card:#241d17; --card2:#2e251d; --line:#453828;
+    --text:#f2ead9; --muted:#b3a586; --accent:#d9b96a;
+    --uifont:-apple-system, "Hiragino Sans", "Segoe UI", sans-serif;
+  }
+  *{ box-sizing:border-box; margin:0; padding:0; -webkit-tap-highlight-color:transparent; }
+  html{ touch-action:manipulation; }
+  body{ background:var(--bg); color:var(--text); font-family:var(--uifont); overscroll-behavior-y:none; }
+  #veil{ position:fixed; inset:0; background:#000; z-index:99; transition:opacity .45s ease; }
+  #veil.gone{ opacity:0; pointer-events:none; }
+  #verBadge{ position:fixed; top:calc(env(safe-area-inset-top,0px) + 4px); left:0; right:0; text-align:center; z-index:39; font-size:11px; color:var(--muted); opacity:.85; pointer-events:none; }
+  header{ position:sticky; top:0; z-index:40; background:rgba(23,19,16,.92); backdrop-filter:blur(8px); padding:calc(env(safe-area-inset-top,0px) + 26px) 16px 10px; border-bottom:1px solid var(--line); }
+  header h1{ font-size:19px; font-weight:700; letter-spacing:.02em; }
+  header .sync{ font-size:11.5px; color:var(--muted); margin-top:3px; min-height:15px; }
+  main{ padding:14px 14px 110px; max-width:680px; margin:0 auto; }
+
+  /* ---- views & slide transition ---- */
+  .view{ position:fixed; inset:0; background:var(--bg); overflow-y:auto; -webkit-overflow-scrolling:touch; }
+  #viewList{ z-index:1; }
+  #viewDetail{ z-index:10; transform:translateX(100%); transition:transform .32s cubic-bezier(.32,.72,.24,1); padding-top:calc(env(safe-area-inset-top,0px) + 64px); }
+  #viewDetail.open{ transform:translateX(0); }
+  #viewDetail main{ padding-top:0; }
+
+  /* ---- pill back button (fixed position, every layered page) ---- */
+  .pillback{ position:fixed; top:calc(env(safe-area-inset-top,0px) + 12px); left:12px; z-index:50; border:1px solid var(--line); background:rgba(36,29,23,.92); color:var(--text); border-radius:999px; padding:9px 18px 9px 14px; font-size:14px; font-weight:600; font-family:var(--uifont); cursor:pointer; }
+
+  /* ---- cards ---- */
+  .card{ display:flex; gap:12px; width:100%; text-align:left; background:var(--card); border:1px solid var(--line); border-radius:14px; padding:14px; margin-bottom:10px; color:var(--text); font-family:var(--uifont); cursor:pointer; }
+  .card .thumb{ flex:0 0 56px; width:56px; height:56px; border-radius:10px; background:var(--card2); display:flex; align-items:center; justify-content:center; font-size:24px; color:var(--accent); overflow:hidden; }
+  .card .thumb img{ width:100%; height:100%; object-fit:cover; }
+  .card .ttl{ font-size:15.5px; font-weight:600; line-height:1.4; }
+  .card .sub{ font-size:12.5px; color:var(--muted); margin-top:3px; line-height:1.5; }
+  .empty{ color:var(--muted); font-size:14px; text-align:center; padding:44px 20px; line-height:1.8; }
+
+  /* ---- detail ---- */
+  .dtitle{ font-size:21px; font-weight:700; line-height:1.45; }
+  .dnote{ font-size:15px; line-height:1.9; margin-top:14px; white-space:pre-wrap; }
+  .dmeta{ font-size:12px; color:var(--muted); margin-top:16px; }
+
+  /* ---- bottom action bar (fixed, floating) ---- */
+  .fab{ position:fixed; left:50%; transform:translateX(-50%); bottom:calc(env(safe-area-inset-bottom,0px) + 16px); z-index:60; border:none; border-radius:999px; background:var(--accent); color:#241a08; font-size:15px; font-weight:700; font-family:var(--uifont); padding:13px 26px; cursor:pointer; box-shadow:0 6px 22px rgba(0,0,0,.45); }
+
+  /* ---- editor sheet ---- */
+  #sheet{ position:fixed; inset:0; z-index:70; background:rgba(0,0,0,.55); display:none; align-items:flex-end; }
+  #sheet.open{ display:flex; }
+  .sheetbody{ background:var(--card); width:100%; max-height:86dvh; overflow-y:auto; border-radius:18px 18px 0 0; padding:20px 16px calc(env(safe-area-inset-bottom,0px) + 20px); }
+  .sheetbody label{ display:block; font-size:12.5px; color:var(--muted); margin:14px 0 6px; }
+  .sheetbody input, .sheetbody textarea{ width:100%; background:var(--bg); border:1px solid var(--line); border-radius:12px; color:var(--text); font-size:16px; padding:11px 13px; font-family:var(--uifont); }
+  .sheetrow{ display:flex; gap:10px; margin-top:18px; }
+  .btn{ flex:1; padding:12px; border-radius:999px; border:1px solid var(--line); background:var(--card2); color:var(--text); font-size:14.5px; font-weight:600; font-family:var(--uifont); cursor:pointer; }
+  .btn.primary{ background:var(--accent); color:#241a08; border:none; }
+  .btn.danger{ color:#e88; }
+  #toast{ position:fixed; left:50%; transform:translateX(-50%); bottom:calc(env(safe-area-inset-bottom,0px) + 76px); z-index:80; background:rgba(20,16,12,.94); border:1px solid var(--line); color:var(--text); font-size:13.5px; padding:10px 18px; border-radius:999px; opacity:0; pointer-events:none; transition:opacity .25s; }
+  #toast.show{ opacity:1; }
+</style>
+</head>
+<body>
+<div id="veil"></div>
+<div id="verBadge"></div>
+
+<div class="view" id="viewList">
+  <header>
+    <h1 id="appTitle">My Collection</h1>
+    <div class="sync" id="syncLine"></div>
+  </header>
+  <main id="listMain"></main>
+</div>
+
+<div class="view" id="viewDetail">
+  <button class="pillback" id="btnBack">‹ Back</button>
+  <main id="detailMain"></main>
+</div>
+
+<button class="fab" id="btnAdd">＋ Add</button>
+
+<div id="sheet">
+  <div class="sheetbody">
+    <div style="font-size:16px; font-weight:700;" id="sheetTitle">New item</div>
+    <label>Title</label>
+    <input id="fTitle" type="text" autocomplete="off">
+    <label>Emoji (thumbnail substitute — swap for an image URL later)</label>
+    <input id="fEmoji" type="text" autocomplete="off" placeholder="📚">
+    <label>Note</label>
+    <textarea id="fNote" rows="5"></textarea>
+    <div class="sheetrow">
+      <button class="btn" id="btnCancel">Cancel</button>
+      <button class="btn primary" id="btnSave">Save</button>
+    </div>
+    <div class="sheetrow" id="rowDelete" style="display:none;">
+      <button class="btn danger" id="btnDelete">Delete this item</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+'use strict';
+/* ================= CONFIG — edit these ================= */
+var APP_NAME     = 'Solo Test Collection';
+var APP_VERSION  = '1.0.0';
+var RELAY_URL    = 'https://script.google.com/macros/s/AKfycbyg2JCMiqCPQx0o3PdoIekqaKEeAWErP93sGO6a53pq88v0EeAZwTVAw9n2MhxBhwQ/exec';              // e.g. https://script.google.com/macros/s/XXXX/exec
+var RELAY_SECRET = 'test-verify-2026-11-24-abc123';              // the same secret as in relay.gs
+var FILE_NAME    = 'solo-app-test.json';  // the canonical JSON file on Drive
+/* ======================================================= */
+
+var LS_CACHE = 'starter.cache.v1';
+var LS_META  = 'starter.meta.v1';
+
+var DATA = { version: 1, updatedAt: '', items: [] };
+var editingId = null;
+var detailId = null;
+
+function $(id){ return document.getElementById(id); }
+function esc(s){ return String(s == null ? '' : s).replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+function nowISO(){ return new Date().toISOString(); }
+function newId(){ return 't' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
+function toast(msg){ var t = $('toast'); t.textContent = msg; t.classList.add('show'); setTimeout(function(){ t.classList.remove('show'); }, 2200); }
+function setSync(msg){ $('syncLine').textContent = msg || ''; }
+
+/* ---------- local cache (speed only — never the truth) ---------- */
+function saveCache(){ try{ localStorage.setItem(LS_CACHE, JSON.stringify(DATA)); }catch(e){} }
+function loadCache(){ try{ var c = JSON.parse(localStorage.getItem(LS_CACHE) || 'null'); if(c && Array.isArray(c.items)) DATA = c; }catch(e){} }
+
+/* ---------- relay ---------- */
+function relayReady(){ return !!(RELAY_URL && RELAY_SECRET); }
+async function relayCall(op, name, content, extra){
+  var body = JSON.stringify(Object.assign({ secret: RELAY_SECRET, op: op, name: name, content: content }, extra || {}));
+  var res = await fetch(RELAY_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: body });
+  if(!res.ok) throw new Error('relay HTTP ' + res.status);
+  var j = JSON.parse(await res.text());
+  if(!j || !j.ok) throw new Error('relay: ' + ((j && j.error) || 'bad response'));
+  return j;
+}
+
+/* ---------- merge: per record, the newer updated_at wins ---------- */
+function mergeItems(local, remote){
+  var byId = {}, order = [];
+  function put(it, prefer){
+    if(!byId[it.id]){ byId[it.id] = it; order.push(it.id); }
+    else if(prefer || String(it.updated_at || '') > String(byId[it.id].updated_at || '')) byId[it.id] = it;
+  }
+  (remote || []).forEach(function(it){ put(it, false); });
+  (local  || []).forEach(function(it){ put(it, true);  });
+  return order.map(function(id){ return byId[id]; });
+}
+
+var syncing = false;
+async function syncNow(){
+  if(!relayReady()){ setSync('Local only — set RELAY_URL / RELAY_SECRET to sync'); return; }
+  if(syncing) return; syncing = true;
+  try{
+    setSync('Syncing…');
+    var st = await relayCall('stat', FILE_NAME);
+    var meta = null; try{ meta = JSON.parse(localStorage.getItem(LS_META) || 'null'); }catch(e){}
+    if(st.exists && meta && String(meta.stamp) === String(st.updated)){ setSync('Up to date'); syncing = false; return; }
+    if(!st.exists){
+      DATA.updatedAt = nowISO();
+      await relayCall('put', FILE_NAME, JSON.stringify(DATA));
+    } else {
+      var g = await relayCall('get', FILE_NAME);
+      var remote = JSON.parse(g.content);
+      var before = JSON.stringify(DATA.items);
+      DATA.items = mergeItems(DATA.items, remote.items || []);
+      DATA.updatedAt = nowISO();
+      if(JSON.stringify(DATA.items) !== before || JSON.stringify(remote.items || []) !== JSON.stringify(DATA.items)){
+        await relayCall('put', FILE_NAME, JSON.stringify(DATA));
+      }
+      var st2 = await relayCall('stat', FILE_NAME);
+      try{ localStorage.setItem(LS_META, JSON.stringify({ stamp: String(st2.updated) })); }catch(e){}
+    }
+    saveCache(); renderList(); if(detailId) renderDetail(detailId);
+    setSync('Synced ' + new Date().toLocaleTimeString());
+  }catch(e){ setSync('Sync failed — working from local copy'); }
+  syncing = false;
+}
+
+/* ---------- rendering ---------- */
+function visibleItems(){ return DATA.items.filter(function(it){ return !it.deleted; }); }
+
+function renderList(){
+  var items = visibleItems();
+  if(!items.length){ $('listMain').innerHTML = '<div class="empty">Nothing here yet.<br>Tap “＋ Add” to create your first item.</div>'; return; }
+  $('listMain').innerHTML = items.map(function(it){
+    var thumb = it.image ? '<img src="' + esc(it.image) + '" alt="">' : esc(it.emoji || '📦');
+    return '<button class="card" data-open="' + esc(it.id) + '">' +
+      '<span class="thumb">' + thumb + '</span>' +
+      '<span><span class="ttl">' + esc(it.title) + '</span>' +
+      (it.note ? '<span class="sub" style="display:block;">' + esc(it.note.split('\n')[0].slice(0, 60)) + '</span>' : '') +
+      '</span></button>';
+  }).join('');
+}
+
+function renderDetail(id){
+  var it = DATA.items.find(function(x){ return x.id === id; });
+  if(!it){ closeDetail(); return; }
+  $('detailMain').innerHTML =
+    '<div class="dtitle">' + esc(it.title) + '</div>' +
+    (it.note ? '<div class="dnote">' + esc(it.note) + '</div>' : '') +
+    '<div class="dmeta">Updated ' + esc((it.updated_at || '').slice(0, 10)) + '</div>' +
+    '<div class="sheetrow"><button class="btn" id="btnEdit">Edit</button></div>';
+  $('btnEdit').addEventListener('click', function(){ openSheet(id); });
+}
+
+function openDetail(id){
+  detailId = id; renderDetail(id);
+  $('viewDetail').classList.add('open');
+  $('viewDetail').scrollTop = 0;
+}
+function closeDetail(){ detailId = null; $('viewDetail').classList.remove('open'); }
+
+/* swipe-back: drag the detail view right to close */
+(function(){
+  var startX = null, dx = 0, el = $('viewDetail');
+  el.addEventListener('touchstart', function(e){ if(e.touches.length === 1 && e.touches[0].clientX < 28){ startX = e.touches[0].clientX; dx = 0; el.style.transition = 'none'; } }, { passive: true });
+  el.addEventListener('touchmove', function(e){ if(startX !== null){ dx = Math.max(0, e.touches[0].clientX - startX); el.style.transform = 'translateX(' + dx + 'px)'; } }, { passive: true });
+  el.addEventListener('touchend', function(){ if(startX !== null){ el.style.transition = ''; el.style.transform = ''; if(dx > 70) closeDetail(); startX = null; } });
+})();
+
+/* ---------- editor sheet ---------- */
+function openSheet(id){
+  editingId = id || null;
+  var it = id ? DATA.items.find(function(x){ return x.id === id; }) : null;
+  $('sheetTitle').textContent = it ? 'Edit item' : 'New item';
+  $('fTitle').value = it ? (it.title || '') : '';
+  $('fEmoji').value = it ? (it.emoji || '') : '';
+  $('fNote').value  = it ? (it.note  || '') : '';
+  $('rowDelete').style.display = it ? 'flex' : 'none';
+  $('sheet').classList.add('open');
+}
+function closeSheet(){ $('sheet').classList.remove('open'); }
+
+function saveSheet(){
+  var title = $('fTitle').value.trim();
+  if(!title){ toast('Give it a title'); return; }
+  if(editingId){
+    var it = DATA.items.find(function(x){ return x.id === editingId; });
+    if(it){ it.title = title; it.emoji = $('fEmoji').value.trim(); it.note = $('fNote').value; it.updated_at = nowISO(); }
+  } else {
+    DATA.items.unshift({ id: newId(), title: title, emoji: $('fEmoji').value.trim() || '📦', note: $('fNote').value, image: '', updated_at: nowISO(), deleted: false });
+  }
+  DATA.updatedAt = nowISO(); saveCache(); renderList(); if(detailId) renderDetail(detailId);
+  closeSheet(); syncNow();
+}
+
+function deleteItem(){
+  var it = DATA.items.find(function(x){ return x.id === editingId; });
+  if(it){ it.deleted = true; it.updated_at = nowISO(); }   /* tombstone — never hard-delete a synced record */
+  DATA.updatedAt = nowISO(); saveCache(); renderList(); closeSheet(); closeDetail(); syncNow();
+}
+
+/* ---------- wire up ---------- */
+$('appTitle').textContent = APP_NAME;
+document.title = APP_NAME;
+$('verBadge').textContent = 'v' + APP_VERSION;
+$('btnBack').addEventListener('click', closeDetail);
+$('btnAdd').addEventListener('click', function(){ openSheet(null); });
+$('btnCancel').addEventListener('click', closeSheet);
+$('btnSave').addEventListener('click', saveSheet);
+$('btnDelete').addEventListener('click', deleteItem);
+$('listMain').addEventListener('click', function(e){
+  var b = e.target.closest('[data-open]'); if(b) openDetail(b.getAttribute('data-open'));
+});
+
+loadCache();
+renderList();
+window.addEventListener('load', function(){
+  setTimeout(function(){ $('veil').classList.add('gone'); }, 60);
+  syncNow();
+});
+</script>
+</body>
+</html>
